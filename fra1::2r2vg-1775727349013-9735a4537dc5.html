@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VORTEX MATRIX GATEWAY // STRATIGRAPHIC Z-CORE</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --fc-100-black: #050508;                      
+            --laser-cyan: #00e5ff;                  
+            --lithos-amber: #ffb000;                     
+            --matrix-green: #00ff41;                      
+            --alert-red: #d92534;
+            --soil-brown: #5c4033;
+            --panel-bg: rgba(10, 15, 20, 0.9); 
+            --border-dim: #334;
+            --font-mono: 'Courier New', Courier, monospace;
+        }
+
+        * { box-sizing: border-box; }
+        body, html { background-color: var(--fc-100-black); color: #e0e0e0; font-family: var(--font-mono); margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        
+        header { flex: 0 0 60px; background: #000; border-bottom: 2px solid var(--lithos-amber); padding: 0 20px; display: flex; justify-content: space-between; align-items: center; z-index: 1000; box-shadow: 0 0 20px rgba(255, 176, 0, 0.2); }
+        .title { color: var(--lithos-amber); font-size: 1.5em; font-weight: bold; letter-spacing: 4px; text-shadow: 0 0 10px var(--lithos-amber); }
+        .status { color: var(--matrix-green); font-size: 0.8em; letter-spacing: 2px; text-align: right; }
+        
+        .main-grid { display: grid; grid-template-columns: 350px 1fr 350px; grid-template-rows: 1fr 200px; width: 100%; height: calc(100vh - 60px); }
+        
+        .panel { background: var(--panel-bg); border-right: 1px solid var(--border-dim); border-bottom: 1px solid var(--border-dim); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; z-index: 10; }
+        .panel-header { color: var(--laser-cyan); font-size: 0.9em; font-weight: bold; border-bottom: 1px solid var(--laser-cyan); padding-bottom: 5px; letter-spacing: 2px; text-transform: uppercase; }
+
+        /* Map & Shader Container */
+        .maps-container { display: flex; flex-direction: column; grid-column: 2 / 3; grid-row: 1 / 2; }
+        #trackerMap { flex: 1; background: #000; border-bottom: 2px solid var(--laser-cyan); z-index: 1; position: relative; }
+        #stratiMap { flex: 1; background: #000; position: relative; overflow: hidden; }
+        
+        canvas { width: 100%; height: 100%; display: block; }
+        .map-label { position: absolute; top: 10px; left: 10px; z-index: 400; background: rgba(0,0,0,0.8); padding: 5px 10px; border: 1px solid var(--laser-cyan); font-size: 0.7em; color: var(--laser-cyan); pointer-events: none; }
+
+        /* Inputs & Buttons */
+        .input-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+        .input-group label { font-size: 0.7em; color: var(--lithos-amber); }
+        .input-group input, .input-group select { background: #000; border: 1px solid #555; color: var(--matrix-green); padding: 10px; font-family: inherit; font-size: 0.8em; outline: none; }
+        .input-group input:focus { border-color: var(--lithos-amber); }
+        .btn-build { background: #221100; color: var(--lithos-amber); border: 1px solid var(--lithos-amber); padding: 12px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        .btn-build:hover { background: var(--lithos-amber); color: #000; box-shadow: 0 0 15px var(--lithos-amber); }
+
+        /* Terminal */
+        .terminal { grid-column: 1 / 4; grid-row: 2 / 3; background: #020202; border-top: 2px solid var(--border-dim); padding: 10px; font-size: 0.75em; color: #aaa; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+        .log-time { color: #555; margin-right: 10px; }
+        .log-sys { color: var(--laser-cyan); }
+        .log-data { color: var(--lithos-amber); }
+        .log-success { color: var(--matrix-green); }
+        .log-warn { color: var(--alert-red); font-weight:bold; }
+        
+        /* Markers */
+        .beacon-marker { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--lithos-amber); background: rgba(255, 176, 0, 0.2); animation: ping 1.5s infinite; }
+        @keyframes ping { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+
+        /* Depth Indicator */
+        .depth-scale { position: absolute; right: 10px; top: 10px; height: calc(100% - 20px); width: 40px; border-left: 1px solid var(--matrix-green); display: flex; flex-direction: column; justify-content: space-between; padding-left: 5px; font-size: 0.6em; color: var(--matrix-green); pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="title">MATRIX GATEWAY // STRATIGRAPHIC CORE</div>
+    <div class="status" id="headerStatus">STATUS: Z-AXIS UNLOCKED</div>
+</header>
+
+<div class="main-grid">
+    <div class="panel">
+        <div class="panel-header">ACTIVE FIELD NODES</div>
+        <div id="gateway-list" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="background: rgba(0,20,0,0.8); border: 1px solid #004400; border-left: 4px solid var(--matrix-green); padding: 10px;">
+                <strong style="color:#fff; font-size:0.85em;">[FRA1::2R2VG-9735]</strong><br>
+                <span style="color:var(--matrix-green); font-size:0.7em;">LoRaWAN | 18.5 kHz | RSSI: -88dBm</span>
+            </div>
+        </div>
+        
+        <div class="panel-header" style="margin-top:20px;">TELEMETRY STREAM</div>
+        <div style="font-size:0.7em; color:#888; display:flex; flex-direction:column; gap:8px;" id="telemetryBox">
+            </div>
+    </div>
+
+    <div class="maps-container">
+        <div id="trackerMap">
+            <div class="map-label" style="border-color:var(--laser-cyan); color:var(--laser-cyan);">XY-LAYER (GEO/LIDAR)</div>
+        </div>
+        <div id="stratiMap">
+            <div class="map-label" style="border-color:var(--lithos-amber); color:var(--lithos-amber);">Z-LAYER (STRATIGRAPHIC SHADER)</div>
+            <canvas id="glCanvas"></canvas>
+            <div class="depth-scale">
+                <span>0 cm (Maaiveld)</span>
+                <span style="color:var(--lithos-amber)">-40 cm (Grens)</span>
+                <span style="color:var(--alert-red)">-120 cm (Mestpakket)</span>
+                <span>-250 cm (Tidaal)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">DEPLOY DEEP-PROBE</div>
+        
+        <div class="input-group">
+            <label>PROBE NAAM</label>
+            <input type="text" id="apiName" value="Lithos_Probe_01">
+        </div>
+        <div class="input-group">
+            <label>PULSE FREQUENTIE (kHz)</label>
+            <input type="number" id="apiFreq" value="557.6" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>Z-AS PENETRATIE (cm)</label>
+            <input type="number" id="apiDepth" value="180" step="10">
+        </div>
+        <div class="input-group">
+            <label>KALMAN R-MATRIX NOISE</label>
+            <select id="apiRValue">
+                <option value="0.1">R=0.1 (Strak, Zand)</option>
+                <option value="2.0" selected>R=2.0 (Chaos, Antropogeen)</option>
+            </select>
+        </div>
+        
+        <button class="btn-build" onclick="fireStratigraphicProbe()">VUUR STRATIGRAFISCHE PULS</button>
+        
+        <div style="margin-top: 15px; font-size: 0.7em; color: #666; line-height: 1.4;">
+            * Een puls creëert een akoestische dwarsdoorsnede. Let op de R-waarde; antropogene lagen (mestpakketten) veroorzaken verhoogde signaal-entropie (visuele ruis).
+        </div>
+    </div>
+
+    <div class="terminal" id="terminal">
+        <div><span class="log-time">[INIT]</span><span class="log-sys">VORTEX Stratigraphic Core v1.4 geladen.</span></div>
+        <div><span class="log-time">[INIT]</span><span class="log-sys">WebGL2 Volumetrische Bodem Shader Standby...</span></div>
+    </div>
+</div>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+    attribute vec2 position;
+    varying vec2 vUv;
+    void main() {
+        vUv = position * 0.5 + 0.5;
+        vUv.y = 1.0 - vUv.y; // Flip Y so top is 0 depth
+        gl_Position = vec4(position, 0.0, 1.0);
+    }
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec2 vUv;
+    uniform float u_time;
+    uniform float u_pingDepth; // 0.0 to 1.0
+
+    // Random & Noise functions
+    float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+    float noise(vec2 st) {
+        vec2 i = floor(st); vec2 f = fract(st);
+        float a = random(i); float b = random(i + vec2(1.0, 0.0));
+        float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    }
+    float fbm(vec2 st) {
+        float value = 0.0; float amplitude = .5; float frequency = 0.;
+        for (int i = 0; i < 5; i++) {
+            value += amplitude * noise(st); st *= 2.; amplitude *= .5;
+        }
+        return value;
+    }
+
+    void main() {
+        vec2 st = vUv * vec2(10.0, 5.0); // Scale coordinates
+        float depth = vUv.y; // 0.0 is top (surface), 1.0 is bottom (deep)
+        
+        vec3 color = vec3(0.0);
+
+        // LAYER 1: Schoon Duinzand (0 - 15% depth -> approx 0-40cm)
+        // Kalman R = 0.1 (low noise)
+        float n1 = fbm(st * 2.0 + u_time * 0.1);
+        vec3 sandColor = mix(vec3(0.8, 0.6, 0.2), vec3(0.6, 0.4, 0.1), n1);
+
+        // LAYER 2: Karolingisch Mestpakket (15% - 50% depth -> approx 40-120cm)
+        // Kalman R = 2.0 (high chaos)
+        float n2 = fbm(st * 15.0 - u_time * 0.5); // High frequency, fast moving chaos
+        vec3 darkSoil = mix(vec3(0.2, 0.1, 0.05), vec3(0.4, 0.15, 0.1), n2);
+
+        // LAYER 3: Steigeraarde / Tidaal (50% - 100% depth -> deep)
+        float n3 = fbm(st * vec2(1.0, 5.0) + u_time * 0.05); // Horizontal stratification
+        vec3 tidalClay = mix(vec3(0.1, 0.2, 0.2), vec3(0.0, 0.1, 0.15), n3);
+
+        // Blend layers based on depth
+        float edge1 = smoothstep(0.13, 0.17, depth);
+        float edge2 = smoothstep(0.45, 0.55, depth);
+        
+        color = mix(sandColor, darkSoil, edge1);
+        color = mix(color, tidalClay, edge2);
+
+        // THE DRILL PING (Acoustic Probe)
+        float pingLine = smoothstep(0.02, 0.0, abs(vUv.x - 0.5)); // Center vertical line
+        float pingHead = smoothstep(0.05, 0.0, length(vec2(vUv.x - 0.5, vUv.y - u_pingDepth)));
+        
+        // Only show line up to the ping depth
+        if (vUv.y < u_pingDepth) {
+            color += vec3(1.0, 0.7, 0.0) * pingLine * 0.5; // Amber laser down
+        }
+        color += vec3(0.0, 1.0, 0.8) * pingHead * 2.0; // Cyan laser head
+
+        gl_FragColor = vec4(color, 1.0);
+    }
+</script>
+
+<script>
+    // --- 1. Terminal Logger ---
+    function logMsg(msg, type = 'log-data') {
+        const term = document.getElementById('terminal');
+        const time = new Date().toISOString().split('T')[1].slice(0,-1);
+        term.innerHTML += `<div><span class="log-time">[${time}]</span><span class="${type}">${msg}</span></div>`;
+        term.scrollTop = term.scrollHeight;
+    }
+
+    function logTelemetry(msg) {
+        const box = document.getElementById('telemetryBox');
+        box.innerHTML = `<div>> ${msg}</div>` + box.innerHTML;
+        if(box.children.length > 5) box.removeChild(box.lastChild);
+    }
+
+    // --- 2. Leaflet Geo Map ---
+    const map = L.map('trackerMap', { zoomControl: false, attributionControl: false }).setView([52.257, 5.214], 13);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map); // Satellite Default
+    
+    const iconHtml = `<div class="beacon-marker"></div>`;
+    const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
+    L.marker([52.257, 5.214], {icon: customIcon}).addTo(map).bindPopup("<b>Laren (9,9)</b>").openPopup();
+
+    // --- 3. WebGL Stratigraphic Shader Setup ---
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+
+    const vsSource = document.getElementById('vertexShader').textContent;
+    const fsSource = document.getElementById('fragmentShader').textContent;
+
+    function compileShader(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const vertexShader = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    const positions = [ -1.0, -1.0, 1.0, -1.0, -1.0,  1.0, -1.0,  1.0, 1.0, -1.0, 1.0,  1.0 ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    const positionLocation = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    const timeLocation = gl.getUniformLocation(program, "u_time");
+    const pingDepthLocation = gl.getUniformLocation(program, "u_pingDepth");
+
+    let startTime = Date.now();
+    let currentPingDepth = 0.0;
+    let targetPingDepth = 0.0;
+
+    function render() {
+        // Resize logic
+        const displayWidth  = canvas.clientWidth;
+        const displayHeight = canvas.clientHeight;
+        if (canvas.width  !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width  = displayWidth;
+            canvas.height = displayHeight;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+
+        // Animation logic
+        let now = (Date.now() - startTime) / 1000.0;
+        gl.uniform1f(timeLocation, now);
+
+        // Smoothly animate the ping line
+        currentPingDepth += (targetPingDepth - currentPingDepth) * 0.05;
+        gl.uniform1f(pingDepthLocation, currentPingDepth);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        requestAnimationFrame(render);
+    }
+    render();
+
+    // --- 4. Acoustic Probe Logic ---
+    function fireStratigraphicProbe() {
+        const depth_cm = parseFloat(document.getElementById('apiDepth').value);
+        const freq = parseFloat(document.getElementById('apiFreq').value);
+        const rValue = document.getElementById('apiRValue').value;
+
+        logMsg(`Initieer Z-As Puls [${freq}kHz]. Doel diepte: -${depth_cm}cm...`, 'log-sys');
+        
+        // Convert depth cm to normalized shader depth (assuming max is 250cm)
+        const normalizedDepth = Math.min(depth_cm / 250.0, 1.0);
+        
+        // Animate shader
+        currentPingDepth = 0.0; // Reset to top
+        targetPingDepth = normalizedDepth; // Drill down
+
+        // Simulate Audio Ping
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.value = 110; // 110 Hz base resonance for deep earth
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (depth_cm / 50.0)); // Deeper = longer echo
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 5.0);
+
+        setTimeout(() => {
+            logMsg(`[PULS REFLECTIE] Bodemresonantie bereikt op -${depth_cm}cm.`, 'log-success');
+            
+            if (depth_cm > 40 && depth_cm < 120) {
+                logMsg(`[WAARSCHUWING] Kalman R-Matrix spike = ${rValue}. Antropogene verstoring gedetecteerd (Mestpakket/Grafheuvel structuur).`, 'log-warn');
+            } else if (depth_cm >= 120) {
+                logMsg(`[ANALYSE] Prehistorische tidaallagen. Stabiele dichtheid.`, 'log-data');
+            }
+        }, 1500);
+    }
+
+    // --- 5. Telemetry Simulation ---
+    setInterval(() => {
+        const volts = (11.0 + Math.random()).toFixed(2);
+        const rssi = -(85 + Math.random() * 10).toFixed(1);
+        logTelemetry(`[FRA1] Haptics OK. Accu: ${volts}V | RSSI: ${rssi}dBm`);
+    }, 4000);
+
+</script>
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VORTEX MATRIX GATEWAY // STRATIGRAPHIC Z-CORE</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --fc-100-black: #050508;                      
+            --laser-cyan: #00e5ff;                  
+            --lithos-amber: #ffb000;                     
+            --matrix-green: #00ff41;                      
+            --alert-red: #d92534;
+            --soil-brown: #5c4033;
+            --panel-bg: rgba(10, 15, 20, 0.9); 
+            --border-dim: #334;
+            --font-mono: 'Courier New', Courier, monospace;
+        }
+
+        * { box-sizing: border-box; }
+        body, html { background-color: var(--fc-100-black); color: #e0e0e0; font-family: var(--font-mono); margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        
+        header { flex: 0 0 60px; background: #000; border-bottom: 2px solid var(--lithos-amber); padding: 0 20px; display: flex; justify-content: space-between; align-items: center; z-index: 1000; box-shadow: 0 0 20px rgba(255, 176, 0, 0.2); }
+        .title { color: var(--lithos-amber); font-size: 1.5em; font-weight: bold; letter-spacing: 4px; text-shadow: 0 0 10px var(--lithos-amber); }
+        .status { color: var(--matrix-green); font-size: 0.8em; letter-spacing: 2px; text-align: right; }
+        
+        .main-grid { display: grid; grid-template-columns: 350px 1fr 350px; grid-template-rows: 1fr 200px; width: 100%; height: calc(100vh - 60px); }
+        
+        .panel { background: var(--panel-bg); border-right: 1px solid var(--border-dim); border-bottom: 1px solid var(--border-dim); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; z-index: 10; }
+        .panel-header { color: var(--laser-cyan); font-size: 0.9em; font-weight: bold; border-bottom: 1px solid var(--laser-cyan); padding-bottom: 5px; letter-spacing: 2px; text-transform: uppercase; }
+
+        /* Map & Shader Container */
+        .maps-container { display: flex; flex-direction: column; grid-column: 2 / 3; grid-row: 1 / 2; }
+        #trackerMap { flex: 1; background: #000; border-bottom: 2px solid var(--laser-cyan); z-index: 1; position: relative; }
+        #stratiMap { flex: 1; background: #000; position: relative; overflow: hidden; }
+        
+        canvas { width: 100%; height: 100%; display: block; }
+        .map-label { position: absolute; top: 10px; left: 10px; z-index: 400; background: rgba(0,0,0,0.8); padding: 5px 10px; border: 1px solid var(--laser-cyan); font-size: 0.7em; color: var(--laser-cyan); pointer-events: none; }
+
+        /* Inputs & Buttons */
+        .input-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+        .input-group label { font-size: 0.7em; color: var(--lithos-amber); }
+        .input-group input, .input-group select { background: #000; border: 1px solid #555; color: var(--matrix-green); padding: 10px; font-family: inherit; font-size: 0.8em; outline: none; }
+        .input-group input:focus { border-color: var(--lithos-amber); }
+        .btn-build { background: #221100; color: var(--lithos-amber); border: 1px solid var(--lithos-amber); padding: 12px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        .btn-build:hover { background: var(--lithos-amber); color: #000; box-shadow: 0 0 15px var(--lithos-amber); }
+
+        /* Terminal */
+        .terminal { grid-column: 1 / 4; grid-row: 2 / 3; background: #020202; border-top: 2px solid var(--border-dim); padding: 10px; font-size: 0.75em; color: #aaa; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+        .log-time { color: #555; margin-right: 10px; }
+        .log-sys { color: var(--laser-cyan); }
+        .log-data { color: var(--lithos-amber); }
+        .log-success { color: var(--matrix-green); }
+        .log-warn { color: var(--alert-red); font-weight:bold; }
+        
+        /* Markers */
+        .beacon-marker { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--lithos-amber); background: rgba(255, 176, 0, 0.2); animation: ping 1.5s infinite; }
+        @keyframes ping { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+
+        /* Depth Indicator */
+        .depth-scale { position: absolute; right: 10px; top: 10px; height: calc(100% - 20px); width: 40px; border-left: 1px solid var(--matrix-green); display: flex; flex-direction: column; justify-content: space-between; padding-left: 5px; font-size: 0.6em; color: var(--matrix-green); pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="title">MATRIX GATEWAY // STRATIGRAPHIC CORE</div>
+    <div class="status" id="headerStatus">STATUS: Z-AXIS UNLOCKED</div>
+</header>
+
+<div class="main-grid">
+    <div class="panel">
+        <div class="panel-header">ACTIVE FIELD NODES</div>
+        <div id="gateway-list" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="background: rgba(0,20,0,0.8); border: 1px solid #004400; border-left: 4px solid var(--matrix-green); padding: 10px;">
+                <strong style="color:#fff; font-size:0.85em;">[FRA1::2R2VG-9735]</strong><br>
+                <span style="color:var(--matrix-green); font-size:0.7em;">LoRaWAN | 18.5 kHz | RSSI: -88dBm</span>
+            </div>
+        </div>
+        
+        <div class="panel-header" style="margin-top:20px;">TELEMETRY STREAM</div>
+        <div style="font-size:0.7em; color:#888; display:flex; flex-direction:column; gap:8px;" id="telemetryBox">
+            </div>
+    </div>
+
+    <div class="maps-container">
+        <div id="trackerMap">
+            <div class="map-label" style="border-color:var(--laser-cyan); color:var(--laser-cyan);">XY-LAYER (GEO/LIDAR)</div>
+        </div>
+        <div id="stratiMap">
+            <div class="map-label" style="border-color:var(--lithos-amber); color:var(--lithos-amber);">Z-LAYER (STRATIGRAPHIC SHADER)</div>
+            <canvas id="glCanvas"></canvas>
+            <div class="depth-scale">
+                <span>0 cm (Maaiveld)</span>
+                <span style="color:var(--lithos-amber)">-40 cm (Grens)</span>
+                <span style="color:var(--alert-red)">-120 cm (Mestpakket)</span>
+                <span>-250 cm (Tidaal)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">DEPLOY DEEP-PROBE</div>
+        
+        <div class="input-group">
+            <label>PROBE NAAM</label>
+            <input type="text" id="apiName" value="Lithos_Probe_01">
+        </div>
+        <div class="input-group">
+            <label>PULSE FREQUENTIE (kHz)</label>
+            <input type="number" id="apiFreq" value="557.6" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>Z-AS PENETRATIE (cm)</label>
+            <input type="number" id="apiDepth" value="180" step="10">
+        </div>
+        <div class="input-group">
+            <label>KALMAN R-MATRIX NOISE</label>
+            <select id="apiRValue">
+                <option value="0.1">R=0.1 (Strak, Zand)</option>
+                <option value="2.0" selected>R=2.0 (Chaos, Antropogeen)</option>
+            </select>
+        </div>
+        
+        <button class="btn-build" onclick="fireStratigraphicProbe()">VUUR STRATIGRAFISCHE PULS</button>
+        
+        <div style="margin-top: 15px; font-size: 0.7em; color: #666; line-height: 1.4;">
+            * Een puls creëert een akoestische dwarsdoorsnede. Let op de R-waarde; antropogene lagen (mestpakketten) veroorzaken verhoogde signaal-entropie (visuele ruis).
+        </div>
+    </div>
+
+    <div class="terminal" id="terminal">
+        <div><span class="log-time">[INIT]</span><span class="log-sys">VORTEX Stratigraphic Core v1.4 geladen.</span></div>
+        <div><span class="log-time">[INIT]</span><span class="log-sys">WebGL2 Volumetrische Bodem Shader Standby...</span></div>
+    </div>
+</div>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+    attribute vec2 position;
+    varying vec2 vUv;
+    void main() {
+        vUv = position * 0.5 + 0.5;
+        vUv.y = 1.0 - vUv.y; // Flip Y so top is 0 depth
+        gl_Position = vec4(position, 0.0, 1.0);
+    }
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec2 vUv;
+    uniform float u_time;
+    uniform float u_pingDepth; // 0.0 to 1.0
+
+    // Random & Noise functions
+    float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+    float noise(vec2 st) {
+        vec2 i = floor(st); vec2 f = fract(st);
+        float a = random(i); float b = random(i + vec2(1.0, 0.0));
+        float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    }
+    float fbm(vec2 st) {
+        float value = 0.0; float amplitude = .5; float frequency = 0.;
+        for (int i = 0; i < 5; i++) {
+            value += amplitude * noise(st); st *= 2.; amplitude *= .5;
+        }
+        return value;
+    }
+
+    void main() {
+        vec2 st = vUv * vec2(10.0, 5.0); // Scale coordinates
+        float depth = vUv.y; // 0.0 is top (surface), 1.0 is bottom (deep)
+        
+        vec3 color = vec3(0.0);
+
+        // LAYER 1: Schoon Duinzand (0 - 15% depth -> approx 0-40cm)
+        // Kalman R = 0.1 (low noise)
+        float n1 = fbm(st * 2.0 + u_time * 0.1);
+        vec3 sandColor = mix(vec3(0.8, 0.6, 0.2), vec3(0.6, 0.4, 0.1), n1);
+
+        // LAYER 2: Karolingisch Mestpakket (15% - 50% depth -> approx 40-120cm)
+        // Kalman R = 2.0 (high chaos)
+        float n2 = fbm(st * 15.0 - u_time * 0.5); // High frequency, fast moving chaos
+        vec3 darkSoil = mix(vec3(0.2, 0.1, 0.05), vec3(0.4, 0.15, 0.1), n2);
+
+        // LAYER 3: Steigeraarde / Tidaal (50% - 100% depth -> deep)
+        float n3 = fbm(st * vec2(1.0, 5.0) + u_time * 0.05); // Horizontal stratification
+        vec3 tidalClay = mix(vec3(0.1, 0.2, 0.2), vec3(0.0, 0.1, 0.15), n3);
+
+        // Blend layers based on depth
+        float edge1 = smoothstep(0.13, 0.17, depth);
+        float edge2 = smoothstep(0.45, 0.55, depth);
+        
+        color = mix(sandColor, darkSoil, edge1);
+        color = mix(color, tidalClay, edge2);
+
+        // THE DRILL PING (Acoustic Probe)
+        float pingLine = smoothstep(0.02, 0.0, abs(vUv.x - 0.5)); // Center vertical line
+        float pingHead = smoothstep(0.05, 0.0, length(vec2(vUv.x - 0.5, vUv.y - u_pingDepth)));
+        
+        // Only show line up to the ping depth
+        if (vUv.y < u_pingDepth) {
+            color += vec3(1.0, 0.7, 0.0) * pingLine * 0.5; // Amber laser down
+        }
+        color += vec3(0.0, 1.0, 0.8) * pingHead * 2.0; // Cyan laser head
+
+        gl_FragColor = vec4(color, 1.0);
+    }
+</script>
+
+<script>
+    // --- 1. Terminal Logger ---
+    function logMsg(msg, type = 'log-data') {
+        const term = document.getElementById('terminal');
+        const time = new Date().toISOString().split('T')[1].slice(0,-1);
+        term.innerHTML += `<div><span class="log-time">[${time}]</span><span class="${type}">${msg}</span></div>`;
+        term.scrollTop = term.scrollHeight;
+    }
+
+    function logTelemetry(msg) {
+        const box = document.getElementById('telemetryBox');
+        box.innerHTML = `<div>> ${msg}</div>` + box.innerHTML;
+        if(box.children.length > 5) box.removeChild(box.lastChild);
+    }
+
+    // --- 2. Leaflet Geo Map ---
+    const map = L.map('trackerMap', { zoomControl: false, attributionControl: false }).setView([52.257, 5.214], 13);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map); // Satellite Default
+    
+    const iconHtml = `<div class="beacon-marker"></div>`;
+    const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
+    L.marker([52.257, 5.214], {icon: customIcon}).addTo(map).bindPopup("<b>Laren (9,9)</b>").openPopup();
+
+    // --- 3. WebGL Stratigraphic Shader Setup ---
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+
+    const vsSource = document.getElementById('vertexShader').textContent;
+    const fsSource = document.getElementById('fragmentShader').textContent;
+
+    function compileShader(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const vertexShader = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    const positions = [ -1.0, -1.0, 1.0, -1.0, -1.0,  1.0, -1.0,  1.0, 1.0, -1.0, 1.0,  1.0 ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    const positionLocation = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    const timeLocation = gl.getUniformLocation(program, "u_time");
+    const pingDepthLocation = gl.getUniformLocation(program, "u_pingDepth");
+
+    let startTime = Date.now();
+    let currentPingDepth = 0.0;
+    let targetPingDepth = 0.0;
+
+    function render() {
+        // Resize logic
+        const displayWidth  = canvas.clientWidth;
+        const displayHeight = canvas.clientHeight;
+        if (canvas.width  !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width  = displayWidth;
+            canvas.height = displayHeight;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+
+        // Animation logic
+        let now = (Date.now() - startTime) / 1000.0;
+        gl.uniform1f(timeLocation, now);
+
+        // Smoothly animate the ping line
+        currentPingDepth += (targetPingDepth - currentPingDepth) * 0.05;
+        gl.uniform1f(pingDepthLocation, currentPingDepth);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        requestAnimationFrame(render);
+    }
+    render();
+
+    // --- 4. Acoustic Probe Logic ---
+    function fireStratigraphicProbe() {
+        const depth_cm = parseFloat(document.getElementById('apiDepth').value);
+        const freq = parseFloat(document.getElementById('apiFreq').value);
+        const rValue = document.getElementById('apiRValue').value;
+
+        logMsg(`Initieer Z-As Puls [${freq}kHz]. Doel diepte: -${depth_cm}cm...`, 'log-sys');
+        
+        // Convert depth cm to normalized shader depth (assuming max is 250cm)
+        const normalizedDepth = Math.min(depth_cm / 250.0, 1.0);
+        
+        // Animate shader
+        currentPingDepth = 0.0; // Reset to top
+        targetPingDepth = normalizedDepth; // Drill down
+
+        // Simulate Audio Ping
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.value = 110; // 110 Hz base resonance for deep earth
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (depth_cm / 50.0)); // Deeper = longer echo
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 5.0);
+
+        setTimeout(() => {
+            logMsg(`[PULS REFLECTIE] Bodemresonantie bereikt op -${depth_cm}cm.`, 'log-success');
+            
+            if (depth_cm > 40 && depth_cm < 120) {
+                logMsg(`[WAARSCHUWING] Kalman R-Matrix spike = ${rValue}. Antropogene verstoring gedetecteerd (Mestpakket/Grafheuvel structuur).`, 'log-warn');
+            } else if (depth_cm >= 120) {
+                logMsg(`[ANALYSE] Prehistorische tidaallagen. Stabiele dichtheid.`, 'log-data');
+            }
+        }, 1500);
+    }
+
+    // --- 5. Telemetry Simulation ---
+    setInterval(() => {
+        const volts = (11.0 + Math.random()).toFixed(2);
+        const rssi = -(85 + Math.random() * 10).toFixed(1);
+        logTelemetry(`[FRA1] Haptics OK. Accu: ${volts}V | RSSI: ${rssi}dBm`);
+    }, 4000);
+
+</script>
+</body>
+</html>
