@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VORTEX MATRIX GATEWAY v2.4 // LIDAR-SYNC</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --fc-100-black: #050508; --laser-cyan: #00e5ff; --lithos-amber: #ffb000;                     
+            --matrix-green: #00ff41; --alert-red: #d92534; --panel-bg: rgba(5, 10, 15, 0.95); 
+            --border-dim: #1a2a3a; --font-mono: 'Courier New', Courier, monospace;
+        }
+        * { box-sizing: border-box; cursor: crosshair; }
+        body, html { background-color: var(--fc-100-black); color: #e0e0e0; font-family: var(--font-mono); margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        
+        header { flex: 0 0 60px; background: #000; border-bottom: 2px solid var(--laser-cyan); padding: 0 20px; display: flex; justify-content: space-between; align-items: center; z-index: 1000; box-shadow: 0 0 20px rgba(0, 229, 255, 0.2); }
+        .title { color: var(--laser-cyan); font-size: 1.1em; font-weight: bold; letter-spacing: 2px; text-shadow: 0 0 8px var(--laser-cyan); }
+        .receiver-id { color: var(--matrix-green); font-size: 0.7em; opacity: 0.8; }
+
+        .main-grid { display: grid; grid-template-columns: 320px 1fr 320px; grid-template-rows: 1fr 220px; width: 100%; height: calc(100vh - 60px); }
+        
+        .panel { background: var(--panel-bg); border-right: 1px solid var(--border-dim); border-bottom: 1px solid var(--border-dim); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; backdrop-filter: blur(10px); }
+        .panel-header { color: var(--lithos-amber); font-size: 0.8em; font-weight: bold; border-bottom: 1px solid var(--lithos-amber); padding-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }
+
+        .maps-container { display: flex; flex-direction: column; grid-column: 2 / 3; grid-row: 1 / 2; position: relative; }
+        #trackerMap { flex: 1.3; background: #020406; border-bottom: 1px solid var(--laser-cyan); }
+        #stratiMap { flex: 1; background: #000; position: relative; overflow: hidden; }
+        
+        canvas { width: 100%; height: 100%; display: block; filter: contrast(1.2) brightness(1.1); }
+        .map-overlay-label { position: absolute; top: 10px; left: 10px; z-index: 400; background: rgba(0,0,0,0.8); padding: 4px 8px; border: 1px solid var(--laser-cyan); font-size: 0.65em; color: var(--laser-cyan); }
+
+        .terminal-container { grid-column: 1 / 4; grid-row: 2 / 3; background: #000; border-top: 2px solid var(--laser-cyan); display: flex; flex-direction: column; }
+        .terminal-output { flex-grow: 1; padding: 12px; overflow-y: auto; font-size: 0.8em; line-height: 1.4; color: #8af; }
+        .terminal-input-wrapper { display: flex; padding: 8px 15px; background: #050508; border-top: 1px solid #1a2a3a; }
+        .cli-prompt { color: var(--laser-cyan); margin-right: 10px; font-weight: bold; }
+        #cliInput { flex-grow: 1; background: transparent; border: none; color: var(--matrix-green); font-family: var(--font-mono); font-size: 1em; outline: none; }
+        
+        .log-sys { color: var(--laser-cyan); } .log-success { color: var(--matrix-green); } .log-warn { color: var(--lithos-amber); } .log-err { color: var(--alert-red); }
+        
+        .btn-action { background: #111; color: var(--laser-cyan); border: 1px solid var(--laser-cyan); padding: 10px; font-family: var(--font-mono); font-size: 0.7em; font-weight: bold; transition: 0.3s; }
+        .btn-action:hover { background: var(--laser-cyan); color: #000; box-shadow: 0 0 15px var(--laser-cyan); }
+        
+        .beacon-marker { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--laser-cyan); background: rgba(0, 229, 255, 0.3); animation: ping 2s infinite ease-out; }
+        @keyframes ping { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(3); opacity: 0; } }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="title">VORTEX // MASTER_SYNC v2.4</div>
+    <div class="receiver-id" id="sysID">SYNCING...</div>
+    <div class="status" id="headerStatus" style="color:var(--matrix-green); font-size:0.7em;">LiDAR & DOPPLER: READY</div>
+</header>
+
+<div class="main-grid">
+    <div class="panel">
+        <div class="panel-header">LiDAR NODE TELEMETRY</div>
+        <div id="telemetryBox" style="font-size:0.65em; color:#68a;"></div>
+        
+        <div class="panel-header" style="margin-top:15px;">UPLINK CHANNELS</div>
+        <div id="gateway-list" style="display:flex; flex-direction:column; gap:5px;"></div>
+    </div>
+
+    <div class="maps-container">
+        <div id="trackerMap"><div class="map-overlay-label">TOPOGRAPHIC XY-SCAN</div></div>
+        <div id="stratiMap"><div class="map-overlay-label" style="border-color:var(--lithos-amber); color:var(--lithos-amber);">LiDAR Z-PROFILE</div><canvas id="glCanvas"></canvas></div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">VORTEX CORE CONTROL</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size:0.6em; color:var(--laser-cyan);">SCAN DIEPTE (cm)</label>
+            <input type="number" id="apiDepth" value="250" style="background:#000; border:1px solid #334; color:var(--matrix-green); padding:5px;">
+            <button class="btn-action" onclick="fireStratigraphicProbe()">START SUBSURFACE PING</button>
+        </div>
+        
+        <div style="margin-top:20px; font-size:0.6em; color:#567; line-height:1.4;">
+            * LiDAR parser gesynchroniseerd met <code>master_vortexv2</code>. <br>
+            * Typ <code>generate lidar</code> voor terreinanalyse.
+        </div>
+    </div>
+
+    <div class="terminal-container">
+        <div class="terminal-output" id="terminalOutput"></div>
+        <div class="terminal-input-wrapper">
+            <span class="cli-prompt">vortex@master:~#</span>
+            <input type="text" id="cliInput" autocomplete="off" spellcheck="false" autofocus>
+        </div>
+    </div>
+</div>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+    attribute vec2 position;
+    varying vec2 vUv;
+    void main() { vUv = position * 0.5 + 0.5; vUv.y = 1.0 - vUv.y; gl_Position = vec4(position, 0.0, 1.0); }
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec2 vUv;
+    uniform float u_time;
+    uniform float u_pingDepth;
+    uniform bool u_isLidar;
+
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p);
+        vec2 u = f*f*(3.0-2.0*f);
+        return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x),
+                   mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y);
+    }
+
+    void main() {
+        vec2 uv = vUv;
+        vec3 color = vec3(0.02, 0.04, 0.08);
+        
+        // Bodemlagen simulatie
+        float layers = noise(uv * vec2(2.0, 10.0) + u_time * 0.05);
+        vec3 soil = mix(vec3(0.3, 0.15, 0.05), vec3(0.1, 0.2, 0.2), step(0.5, uv.y + layers * 0.1));
+        color = mix(color, soil, 0.6);
+
+        // LiDAR Puntsignalen
+        if(u_isLidar) {
+            float scan = fract(uv.x * 20.0 - u_time);
+            float pts = step(0.95, fract(uv.y * 50.0 + sin(uv.x * 10.0)));
+            color += vec3(0.0, 1.0, 0.5) * pts * scan * 0.5;
+        }
+
+        // Subsurface Probe Laser
+        float laser = smoothstep(0.01, 0.0, abs(uv.x - 0.5));
+        if(uv.y < u_pingDepth) {
+            color += vec3(1.0, 0.7, 0.0) * laser * (sin(u_time * 20.0) * 0.5 + 0.5);
+        }
+
+        gl_FragColor = vec4(color, 1.0);
+    }
+</script>
+
+<script>
+    let activeNodes = [];
+    const sys_id = "VORTEX-" + Math.random().toString(36).substr(2, 9).toUpperCase();
+    document.getElementById('sysID').innerText = "ONTVALGER-ID: " + sys_id;
+
+    function logMsg(msg, type = 'log-sys') {
+        const term = document.getElementById('terminalOutput');
+        const time = new Date().toLocaleTimeString();
+        term.innerHTML += `<div><span style="color:#555; margin-right:10px;">[${time}]</span><span class="${type}">${msg}</span></div>`;
+        term.scrollTop = term.scrollHeight;
+    }
+
+    // Leaflet Setup
+    const map = L.map('trackerMap', { zoomControl: false }).setView([52.257, 5.214], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+    const customIcon = L.divIcon({ html: `<div class="beacon-marker"></div>`, className: '', iconSize: [16,16], iconAnchor: [8,8] });
+
+    // LiDAR Generator
+    function generateLidarGrid() {
+        logMsg("[SCAN] Initialiseren LiDAR terrein-analyse...", "log-sys");
+        u_isLidar = true;
+        setTimeout(() => {
+            const center = map.getCenter();
+            const features = [];
+            for(let i=0; i<15; i++) {
+                const lat = center.lat + (Math.random() * 0.02 - 0.01);
+                const lon = center.lng + (Math.random() * 0.02 - 0.01);
+                const alt = (Math.random() * 45).toFixed(2);
+                const m = L.circleMarker([lat, lon], { radius: 3, color: '#0f4', weight: 1, fillOpacity: 0.6 }).addTo(map);
+                m.bindPopup(`<b>LiDAR Point</b><br>Hoogte: ${alt}m NAP`);
+                activeNodes.push(m);
+            }
+            logMsg(`[SUCCES] 15 LiDAR datapunten geëxtraheerd en geplot op NAP-niveau.`, "log-success");
+        }, 1000);
+    }
+
+    // CLI logic
+    const cliInput = document.getElementById('cliInput');
+    cliInput.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter') {
+            const cmd = cliInput.value.trim().toLowerCase();
+            logMsg(`vortex@master:~# ${cmd}`, "log-user");
+            cliInput.value = '';
+            
+            if(cmd === 'help') {
+                logMsg("Beschikbare commando's:", "log-warn");
+                logMsg(" > <b>generate lidar</b> - Start 3D terrein-scan.");
+                logMsg(" > <b>generate nodes</b> - Genereer stratigrafische meetpunten.");
+                logMsg(" > <b>clear</b> - Wis terminal en kaartobjecten.");
+                logMsg(" > <b>upload geojson</b> - Laad extern databestand.");
+            } else if(cmd === 'generate lidar') {
+                generateLidarGrid();
+            } else if(cmd === 'clear') {
+                document.getElementById('terminalOutput').innerHTML = '';
+                activeNodes.forEach(n => map.removeLayer(n));
+                activeNodes = [];
+                u_isLidar = false;
+            } else if(cmd === 'upload geojson') {
+                const inp = document.createElement('input'); inp.type = 'file';
+                inp.onchange = ev => {
+                    const reader = new FileReader();
+                    reader.onload = e => {
+                        const data = JSON.parse(e.target.result);
+                        const lyr = L.geoJSON(data, { style: {color: '#ffb000', weight: 2} }).addTo(map);
+                        activeNodes.push(lyr);
+                        map.fitBounds(lyr.getBounds());
+                        logMsg("GeoJSON Payload succesvol geïnjecteerd.", "log-success");
+                    };
+                    reader.readAsText(ev.target.files[0]);
+                };
+                inp.click();
+            } else {
+                logMsg(`FOUT: Commando '${cmd}' niet herkend.`, "log-err");
+            }
+        }
+    });
+
+    // WebGL Engine
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+    const compile = (t, s) => { let sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, document.getElementById('vertexShader').textContent));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, document.getElementById('fragmentShader').textContent));
+    gl.linkProgram(prog); gl.useProgram(prog);
+
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+    const pLoc = gl.getAttribLocation(prog, "position"); gl.enableVertexAttribArray(pLoc);
+    gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
+
+    const tLoc = gl.getUniformLocation(prog, "u_time");
+    const dLoc = gl.getUniformLocation(prog, "u_pingDepth");
+    const lLoc = gl.getUniformLocation(prog, "u_isLidar");
+
+    let targetD = 0, currentD = 0, u_isLidar = false;
+
+    function render() {
+        canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        currentD += (targetD - currentD) * 0.05;
+        gl.uniform1f(tLoc, performance.now() / 1000);
+        gl.uniform1f(dLoc, currentD);
+        gl.uniform1i(lLoc, u_isLidar);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        requestAnimationFrame(render);
+    }
+    render();
+
+    window.fireStratigraphicProbe = () => {
+        const d = document.getElementById('apiDepth').value;
+        logMsg(`Initieer Pulse naar -${d}cm diepte...`, "log-sys");
+        targetD = Math.min(d/500, 1.0);
+        const m = L.marker(map.getCenter(), {icon: customIcon}).addTo(map);
+        activeNodes.push(m);
+    };
+
+    // Telemetry Sim
+    setInterval(() => {
+        const box = document.getElementById('telemetryBox');
+        box.innerHTML = `<div>> SYS_LATENCY: ${Math.floor(Math.random()*20)}ms</div>` + 
+                        `<div>> LIDAR_SAT_LOCK: OK</div>` + 
+                        `<div>> CORE_TEMP: 32.4°C</div>` + box.innerHTML.substring(0, 100);
+    }, 3000);
+
+</script>
+</body>
+</html>

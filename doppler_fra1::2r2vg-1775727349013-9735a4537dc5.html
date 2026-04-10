@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VORTEX MATRIX GATEWAY // OMNI-NODE ROUTER</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --fc-100-black: #050508;                      
+            --laser-cyan: #00e5ff;                  
+            --lithos-amber: #ffb000;                     
+            --matrix-green: #00ff41;                      
+            --alert-red: #d92534;
+            --panel-bg: rgba(10, 15, 20, 0.9); 
+            --border-dim: #334;
+            --font-mono: 'Courier New', Courier, monospace;
+        }
+
+        * { box-sizing: border-box; }
+        
+        body, html { 
+            background-color: var(--fc-100-black); 
+            color: #e0e0e0; 
+            font-family: var(--font-mono); 
+            margin: 0; 
+            padding: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        
+        header { 
+            flex: 0 0 60px; 
+            background: #000; 
+            border-bottom: 2px solid var(--lithos-amber); 
+            padding: 0 20px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            z-index: 1000; 
+            box-shadow: 0 0 20px rgba(255, 176, 0, 0.2); 
+        }
+        
+        .title { color: var(--lithos-amber); font-size: 1.3em; font-weight: bold; letter-spacing: 3px; text-shadow: 0 0 10px var(--lithos-amber); }
+        .status { color: var(--matrix-green); font-size: 0.8em; letter-spacing: 2px; text-align: right; }
+        
+        .main-grid { 
+            display: grid; 
+            grid-template-columns: 350px 1fr 350px; 
+            grid-template-rows: 1fr 200px; 
+            width: 100%; 
+            height: calc(100vh - 60px); 
+        }
+        
+        .panel { 
+            background: var(--panel-bg); 
+            border-right: 1px solid var(--border-dim); 
+            border-bottom: 1px solid var(--border-dim); 
+            padding: 15px; 
+            overflow-y: auto; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px; 
+            z-index: 10; 
+            backdrop-filter: blur(5px); 
+        }
+        
+        .panel-header { color: var(--laser-cyan); font-size: 0.9em; font-weight: bold; border-bottom: 1px solid var(--laser-cyan); padding-bottom: 5px; letter-spacing: 2px; text-transform: uppercase; }
+
+        .gateway-item { background: #000; border: 1px solid #444; padding: 10px; border-left: 4px solid #444; transition: 0.3s; display: flex; justify-content: space-between; align-items: center; }
+        .gateway-item.active { border-left-color: var(--matrix-green); border-color: #004400; background: rgba(0, 20, 0, 0.8); }
+        .gateway-info { display: flex; flex-direction: column; }
+        .gw-name { font-weight: bold; font-size: 0.85em; color: #fff; }
+        .gw-status { font-size: 0.7em; color: #888; }
+        .active .gw-status { color: var(--matrix-green); }
+        .btn-connect { background: #111; color: var(--laser-cyan); border: 1px solid var(--laser-cyan); padding: 8px 10px; cursor: pointer; font-size: 0.7em; font-weight: bold; }
+        .btn-connect:hover { background: var(--laser-cyan); color: #000; }
+
+        .input-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+        .input-group label { font-size: 0.7em; color: var(--lithos-amber); }
+        .input-group input, .input-group select { background: #000; border: 1px solid #555; color: var(--matrix-green); padding: 10px; font-family: inherit; font-size: 0.8em; outline: none; }
+        .input-group input:focus { border-color: var(--lithos-amber); }
+        .btn-build { background: #221100; color: var(--lithos-amber); border: 1px solid var(--lithos-amber); padding: 12px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        .btn-build:hover { background: var(--lithos-amber); color: #000; box-shadow: 0 0 15px var(--lithos-amber); }
+
+        .maps-container { display: flex; flex-direction: column; grid-column: 2 / 3; grid-row: 1 / 2; }
+        #trackerMap { flex: 1.2; background: #000; border-bottom: 2px solid var(--laser-cyan); z-index: 1; position: relative; }
+        #stratiMap { flex: 1; background: #000; position: relative; overflow: hidden; }
+        
+        canvas { width: 100%; height: 100%; display: block; }
+        .map-label { position: absolute; top: 10px; left: 10px; z-index: 400; background: rgba(0,0,0,0.8); padding: 5px 10px; border: 1px solid var(--laser-cyan); font-size: 0.7em; color: var(--laser-cyan); pointer-events: none; }
+
+        .terminal-container { grid-column: 1 / 4; grid-row: 2 / 3; background: #020202; border-top: 2px solid var(--border-dim); display: flex; flex-direction: column; font-size: 0.8em; color: #aaa; overflow: hidden; }
+        .terminal-output { flex-grow: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+        .terminal-input-wrapper { display: flex; padding: 5px 10px; background: #050508; border-top: 1px solid #222; align-items: center; }
+        .cli-prompt { color: var(--laser-cyan); margin-right: 10px; font-weight: bold; }
+        #cliInput { flex-grow: 1; background: transparent; border: none; color: var(--matrix-green); font-family: var(--font-mono); font-size: 1em; outline: none; }
+        
+        .log-time { color: #555; margin-right: 10px; }
+        .log-sys { color: var(--laser-cyan); }
+        .log-data { color: var(--lithos-amber); }
+        .log-success { color: var(--matrix-green); }
+        .log-warn { color: var(--alert-red); font-weight:bold; }
+        .log-error { color: #ff0033; font-weight:bold; background: rgba(255,0,0,0.1); padding: 2px; }
+        .log-user { color: #fff; }
+        
+        .beacon-marker { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--lithos-amber); background: rgba(255, 176, 0, 0.2); animation: ping 1.5s infinite; }
+        @keyframes ping { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+
+        .leaflet-control-layers { background: rgba(0, 0, 0, 0.9) !important; color: var(--matrix-green) !important; border: 1px solid var(--laser-cyan) !important; font-family: var(--font-mono); }
+        .leaflet-control-layers-toggle { filter: invert(1) hue-rotate(180deg); }
+
+        @media screen and (max-width: 950px) {
+            body, html { height: auto; overflow-y: auto; overflow-x: hidden; }
+            header { flex-direction: column; height: auto; padding: 15px; gap: 5px; text-align: center; }
+            .main-grid { display: flex; flex-direction: column; height: auto; }
+            .panel { border-right: none; border-bottom: 2px solid var(--border-dim); max-height: none; }
+            .maps-container { height: 80vh; border-bottom: 2px solid var(--border-dim); }
+            #trackerMap { flex: 1.5; min-height: 350px; } 
+            #stratiMap { flex: 1; min-height: 200px; }
+            .terminal-container { height: 40vh; min-height: 250px; border-top: none; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="title">MATRIX GATEWAY // OMNI-NODE & STRATIGRAPHY</div>
+    <div class="status" id="headerStatus">STATUS: VORTEX v2.3 // DOPPLER RADAR ONLINE</div>
+</header>
+
+<div class="main-grid">
+    <div class="panel">
+        <div class="panel-header">INSTITUTIONAL UPLINKS</div>
+        <div id="gateway-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+        
+        <div class="panel-header" style="margin-top:20px;">TELEMETRY STREAM</div>
+        <div style="font-size:0.7em; color:#888; display:flex; flex-direction:column; gap:8px;" id="telemetryBox"></div>
+    </div>
+
+    <div class="maps-container">
+        <div id="trackerMap">
+            <div class="map-label">XY-LAYER (GEO/BODEMKAART)</div>
+        </div>
+        <div id="stratiMap">
+            <div class="map-label">Z-LAYER (STRATIGRAPHIC SHADER)</div>
+            <canvas id="glCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">DEPLOY DEEP-PROBE / NODE</div>
+        
+        <div class="input-group">
+            <label>PROBE NAAM</label>
+            <input type="text" id="apiName" value="Lithos_Probe_01">
+        </div>
+        <div class="input-group">
+            <label>PULSE FREQUENTIE (kHz)</label>
+            <input type="number" id="apiFreq" value="557.6" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>COÖRDINATEN (Lat, Lon)</label>
+            <input type="text" id="apiCoords" value="52.257, 5.214">
+        </div>
+        <div class="input-group">
+            <label>Z-AS PENETRATIE (cm)</label>
+            <input type="number" id="apiDepth" value="180" step="10">
+        </div>
+        
+        <button class="btn-build" onclick="fireStratigraphicProbe()">VUUR STRATIGRAFISCHE PULS</button>
+        
+        <div style="margin-top: 15px; font-size: 0.7em; color: #666; line-height: 1.4;">
+            * Typ <code>generate doppler</code> in de CLI om 8 radardoelen te genereren mét snelheidsanalyse.<br>
+            * Typ <code>calc doppler [km/u] [MHz]</code> om zelf radar-frequentieverschuiving te berekenen.
+        </div>
+    </div>
+
+    <div class="terminal-container">
+        <div class="terminal-output" id="terminalOutput">
+            <div><span class="log-time">[INIT]</span><span class="log-sys">VORTEX Matrix Gateway v2.3 geladen.</span></div>
+            <div><span class="log-time">[INIT]</span><span class="log-sys">Coherente Doppler Radar Calculators (f_D) ONLINE.</span></div>
+        </div>
+        <div class="terminal-input-wrapper">
+            <span class="cli-prompt">vortex@sys:~#</span>
+            <input type="text" id="cliInput" autocomplete="off" spellcheck="false" autofocus>
+        </div>
+    </div>
+</div>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+    attribute vec2 position;
+    varying vec2 vUv;
+    void main() {
+        vUv = position * 0.5 + 0.5;
+        vUv.y = 1.0 - vUv.y; 
+        gl_Position = vec4(position, 0.0, 1.0);
+    }
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec2 vUv;
+    uniform float u_time;
+    uniform float u_pingDepth; 
+
+    float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+    float noise(vec2 st) {
+        vec2 i = floor(st); vec2 f = fract(st);
+        float a = random(i); float b = random(i + vec2(1.0, 0.0));
+        float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    }
+    float fbm(vec2 st) {
+        float value = 0.0; float amplitude = .5;
+        for (int i = 0; i < 5; i++) {
+            value += amplitude * noise(st); st *= 2.; amplitude *= .5;
+        }
+        return value;
+    }
+
+    void main() {
+        vec2 st = vUv * vec2(10.0, 5.0); 
+        float depth = vUv.y; 
+        vec3 color = vec3(0.0);
+
+        float n1 = fbm(st * 2.0 + u_time * 0.1);
+        vec3 sandColor = mix(vec3(0.8, 0.6, 0.2), vec3(0.6, 0.4, 0.1), n1);
+
+        float n2 = fbm(st * 15.0 - u_time * 0.5); 
+        vec3 darkSoil = mix(vec3(0.2, 0.1, 0.05), vec3(0.4, 0.15, 0.1), n2);
+
+        float n3 = fbm(st * vec2(1.0, 5.0) + u_time * 0.05); 
+        vec3 tidalClay = mix(vec3(0.1, 0.2, 0.2), vec3(0.0, 0.1, 0.15), n3);
+
+        float edge1 = smoothstep(0.13, 0.17, depth);
+        float edge2 = smoothstep(0.45, 0.55, depth);
+        
+        color = mix(sandColor, darkSoil, edge1);
+        color = mix(color, tidalClay, edge2);
+
+        float pingLine = smoothstep(0.02, 0.0, abs(vUv.x - 0.5)); 
+        float pingHead = smoothstep(0.05, 0.0, length(vec2(vUv.x - 0.5, vUv.y - u_pingDepth)));
+        
+        if (vUv.y < u_pingDepth) { color += vec3(1.0, 0.7, 0.0) * pingLine * 0.5; }
+        color += vec3(0.0, 1.0, 0.8) * pingHead * 2.0; 
+
+        gl_FragColor = vec4(color, 1.0);
+    }
+</script>
+
+<script>
+    // --- 0. Logging System & Globals ---
+    let activeProbeNodes = []; 
+
+    function logMsg(msg, type = 'log-data') {
+        const term = document.getElementById('terminalOutput');
+        const time = new Date().toISOString().split('T')[1].slice(0,-1);
+        term.innerHTML += `<div><span class="log-time">[${time}]</span><span class="${type}">${msg}</span></div>`;
+        term.scrollTop = term.scrollHeight;
+    }
+    function logTelemetry(msg) {
+        const box = document.getElementById('telemetryBox');
+        box.innerHTML = `<div>> ${msg}</div>` + box.innerHTML;
+        if(box.children.length > 5) box.removeChild(box.lastChild);
+    }
+
+    // --- 1. Leaflet Geo-Map met Basis PDOK Providers ---
+    const darkMatter = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '© CartoDB' });
+    const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '© Esri' });
+    
+    const pdokBodem = L.tileLayer.wms('https://service.pdok.nl/bzk/bro-bodemkaart/wms/v1_0?', {
+        layers: 'bro-bodemkaart', format: 'image/png', transparent: true, opacity: 0.6, attribution: '© PDOK / BRO'
+    });
+
+    const map = L.map('trackerMap', { zoomControl: true, attributionControl: false, layers: [satellite] }).setView([52.257, 5.214], 12);
+    const baseMaps = { "VORTEX Dark": darkMatter, "Satelliet (Esri)": satellite };
+    const overlayMaps = { "Bodemkaart NL (PDOK)": pdokBodem };
+
+    L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
+
+    const customIcon = L.divIcon({ html: `<div class="beacon-marker"></div>`, className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
+    L.marker([52.257, 5.214], {icon: customIcon}).addTo(map).bindPopup("<b>Westerheide Nulpunt</b>").openPopup();
+
+    // --- 2. Parser & Generator Functies ---
+    window.processCommand = processCommand;
+
+    // GeoJSON Renderer v2.3 (Geüpgraded met Hacker-Style Markers)
+    function renderGeoJSONData(data) {
+        if (!data.type || (data.type !== 'FeatureCollection' && data.type !== 'Feature')) {
+            throw new Error("Ongeldige GeoJSON structuur.");
+        }
+
+        const geoLayer = L.geoJSON(data, {
+            pointToLayer: function (feature, latlng) {
+                return L.circleMarker(latlng, {
+                    radius: 7,
+                    fillColor: "var(--laser-cyan)",
+                    color: "var(--matrix-green)",
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.4
+                });
+            },
+            style: function (feature) {
+                return {color: 'var(--laser-cyan)', weight: 2, fillOpacity: 0.2, dashArray: '3'};
+            },
+            onEachFeature: function (feature, layer) {
+                let props = feature.properties || {};
+                let popupContent = `<b>Data Extractie:</b><br><ul style="margin:0; padding-left:15px; font-size:0.8em; color:#000;">`;
+                for(let key in props) {
+                    popupContent += `<li><b>${key}:</b> ${props[key]}</li>`;
+                }
+                popupContent += `</ul>`;
+                layer.bindPopup(popupContent);
+            }
+        }).addTo(map);
+
+        activeProbeNodes.push(geoLayer);
+        map.fitBounds(geoLayer.getBounds());
+    }
+
+    function handleLocalFileUpload() {
+        let input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.geojson,.json';
+        
+        input.onchange = e => {
+            let file = e.target.files[0];
+            if (!file) return;
+            
+            logMsg(`[INIT] Inladen van lokaal bestand: ${file.name}...`, 'log-sys');
+            
+            let reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    let data = JSON.parse(evt.target.result);
+                    renderGeoJSONData(data);
+                    logMsg(`[SUCCES] Lokaal bestand ${file.name} succesvol geplot in de Matrix.`, 'log-success');
+                } catch(err) {
+                    logMsg(`[JSON FOUT] Fout bij het lezen van ${file.name}: ${err.message}`, 'log-error');
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+
+    // Generator 1: Statische Bodem Probes
+    function executePythonGenerator() {
+        logMsg(`[INIT] Uitvoeren van interne GeoJSON generator (Statische Nodes)...`, 'log-sys');
+        setTimeout(() => {
+            const base_lat = 52.257; const base_lon = 5.214; const features = [];
+            for (let i = 1; i <= 5; i++) {
+                const rand_lat = base_lat + (Math.random() * 0.04 - 0.02);
+                const rand_lon = base_lon + (Math.random() * 0.04 - 0.02);
+                features.push({
+                    type: "Feature",
+                    geometry: { type: "Point", coordinates: [rand_lon, rand_lat] },
+                    properties: {
+                        "Naam": `VORTEX_AutoNode_${i}`,
+                        "Status": "ONLINE",
+                        "Diepte_cm": Math.floor(Math.random() * 250) + 50
+                    }
+                });
+            }
+            logMsg(`[SUCCES] 5 Statische probes in het geheugen gegenereerd.`, 'log-success');
+            renderGeoJSONData({ type: "FeatureCollection", features: features });
+        }, 600);
+    }
+
+    // Generator 2: Coherente Doppler Radar Sweep (Gebaseerd op Radartutorial.eu)
+    function executeDopplerGenerator() {
+        logMsg(`[INIT] Activeren van Coherente Radar Sweep...`, 'log-sys');
+        logMsg(`> Parameters: Zendfrequentie (f) = 2975 MHz | Constante (c) = 3x10^8 m/s`, 'log-data');
+        
+        setTimeout(() => {
+            const base_lat = 52.257; 
+            const base_lon = 5.214;
+            const f_hz = 2975 * 1e6; // 2975 MHz 
+            const c = 3 * 1e8; // Lichtsnelheid in m/s
+            const features = [];
+
+            for (let i = 1; i <= 8; i++) {
+                const rand_lat = base_lat + (Math.random() * 0.4 - 0.2); 
+                const rand_lon = base_lon + (Math.random() * 0.4 - 0.2);
+                
+                // Genereer snelheid tussen 50 en 850 km/u
+                const v_kmh = Math.floor(Math.random() * 800) + 50; 
+                const v_ms = v_kmh / 3.6;
+                
+                // Doppler Formule: f_D = (2 * v * f) / c
+                const f_d = Math.round((2 * v_ms * f_hz) / c);
+                
+                features.push({
+                    type: "Feature",
+                    geometry: { type: "Point", coordinates: [rand_lon, rand_lat] },
+                    properties: {
+                        "Identificatie": `RADAR_BOGEY_0${i}`,
+                        "Classificatie": "Luchtobject",
+                        "Radiale_Snelheid": `${v_kmh} km/u (${v_ms.toFixed(1)} m/s)`,
+                        "Doppler_Verschuiving_fD": `${f_d} Hz`,
+                        "Status": v_kmh > 600 ? "HOGE SNELHEID (Interceptie vereist)" : "MONITORING"
+                    }
+                });
+            }
+
+            logMsg(`[SUCCES] Sweep voltooid. 8 bewegende doelen gedetecteerd. f_D berekend via (2·v·f)/c.`, 'log-success');
+            renderGeoJSONData({ type: "FeatureCollection", features: features });
+        }, 1200);
+    }
+
+    // Externe Fetch (voor XML)
+    async function safeFetch(url) {
+        let response;
+        try {
+            response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP Fout: ${response.status}`);
+            return response;
+        } catch (err) {
+            logMsg(`[CORS/NETWERK] Directe fetch geblokkeerd. Route via bypass-proxy...`, 'log-warn');
+            return await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+        }
+    }
+
+    async function parseXMLFeed(url) {
+        logMsg(`[INIT] Verbinden met externe XML server...`, 'log-sys');
+        try {
+            const response = await safeFetch(url);
+            const str = await response.text();
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(str, "text/xml");
+            
+            if (xmlDoc.querySelector("parsererror")) {
+                logMsg(`[XML FOUT] Documentstructuur corrupt.`, 'log-error'); return;
+            }
+
+            const entries = xmlDoc.querySelectorAll("entry");
+            let zonesAdded = 0; let boundsArray = [];
+
+            entries.forEach(entry => {
+                const title = entry.querySelector("title") ? entry.querySelector("title").textContent : "Onbekende Zone";
+                let geoNode = entry.getElementsByTagNameNS("*", "polygon")[0] || entry.getElementsByTagNameNS("*", "box")[0];
+                let linkButtonsHTML = '';
+                entry.querySelectorAll("link").forEach(l => {
+                    let href = l.getAttribute("href");
+                    if (href && (href.toLowerCase().includes("json"))) {
+                        linkButtonsHTML += `<div style="margin-top: 8px;"><button onclick="window.processCommand('import geojson ${href}')" style="background:#050508; color:var(--matrix-green); border:1px solid var(--matrix-green); padding:5px; font-family:var(--font-mono); font-size:0.8em; cursor:pointer; width:100%;">[+] EXTRAHEER GEOJSON DATA</button></div>`;
+                    }
+                });
+
+                if (geoNode) {
+                    const coords = geoNode.textContent.trim().replace(/\s+/g, ' ').split(' ');
+                    const latlngs = [];
+                    for(let i=0; i<coords.length; i+=2) if(coords[i] && coords[i+1]) latlngs.push([parseFloat(coords[i]), parseFloat(coords[i+1])]);
+
+                    if (latlngs.length > 0) {
+                        const poly = L.polygon(latlngs, {color: 'var(--laser-cyan)', weight: 2, fillOpacity: 0.1, dashArray: '4'})
+                                     .bindPopup(`<div style="font-family:var(--font-mono); color:#000;"><b>${title}</b><br><span style="font-size:0.8em; color:#555;">XML/ATOM Box</span>${linkButtonsHTML}</div>`);
+                        poly.addTo(map); activeProbeNodes.push(poly);
+                        zonesAdded++; boundsArray = boundsArray.concat(latlngs);
+                    }
+                }
+            });
+
+            if (zonesAdded > 0) {
+                logMsg(`[SUCCES] XML Parsing voltooid. ${zonesAdded} geo-zones geplot.`, 'log-success');
+                map.fitBounds(boundsArray, { padding: [50, 50] });
+            }
+        } catch (error) { logMsg(`[VERBINDINGS FOUT] Parsen gestaakt: ${error.message}`, 'log-error'); }
+    }
+
+    // --- 3. Interactieve CLI Functionaliteit ---
+    const cliInput = document.getElementById('cliInput');
+    
+    cliInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            const commandLine = this.value.trim();
+            if (commandLine === '') return;
+            logMsg(`vortex@sys:~# ${commandLine}`, 'log-user');
+            processCommand(commandLine);
+            this.value = '';
+        }
+    });
+
+    function processCommand(cmdLine) {
+        const args = cmdLine.split(' ').filter(val => val.length > 0);
+        const command = args[0].toLowerCase();
+
+        switch (command) {
+            case 'help':
+                logMsg(`--- VORTEX CLI KERNCOMMANDO'S ---`, 'log-sys');
+                logMsg(`  <b>generate doppler</b> - Activeer coherente radar sweep (berekent f_D).`, 'log-data');
+                logMsg(`  <b>calc doppler [km/u] [MHz]</b> - Rekenmachine voor dopplerfrequentie.`, 'log-data');
+                logMsg(`  <b>generate nodes</b> - Plot 5 statische probes via GeoJSON protocol.`, 'log-data');
+                logMsg(`  <b>upload geojson</b> - Upload direct een lokaal databestand.`, 'log-data');
+                logMsg(`  <b>clear nodes</b> - Verwijder alle overlays van de kaart.`, 'log-data');
+                logMsg(`  <b>clear</b> - Leegt de terminal output.`, 'log-data');
+                break;
+
+            case 'generate':
+                if (args[1] === 'nodes') executePythonGenerator();
+                else if (args[1] === 'doppler') executeDopplerGenerator();
+                else logMsg(`[FOUT] Syntaxis: generate nodes | generate doppler`, 'log-warn');
+                break;
+
+            case 'calc':
+                if (args[1] === 'doppler' && args[2] && args[3]) {
+                    const v_kmh = parseFloat(args[2]);
+                    const f_mhz = parseFloat(args[3]);
+                    const v_ms = v_kmh / 3.6;
+                    const f_hz = f_mhz * 1e6;
+                    const c = 3 * 1e8;
+                    const f_d = Math.round((2 * v_ms * f_hz) / c);
+                    logMsg(`[MATH] f_D = (2 · ${v_ms.toFixed(2)} m/s · ${f_mhz}e6 Hz) / 3e8 m/s`, 'log-sys');
+                    logMsg(`[RESULTAAT] Dopplerverschuiving (f_D): ${f_d} Hz`, 'log-success');
+                } else {
+                    logMsg(`[FOUT] Syntaxis: calc doppler [snelheid_km/u] [zendfrequentie_mhz]`, 'log-warn');
+                }
+                break;
+
+            case 'upload':
+                if (args[1] === 'geojson' || args[1] === 'json') handleLocalFileUpload();
+                else logMsg(`[FOUT] Syntaxis: upload geojson`, 'log-warn');
+                break;
+                
+            case 'clear':
+            case 'delete':
+                if (args[1] === 'nodes' || args[1] === 'probes') {
+                    if(activeProbeNodes.length === 0) logMsg("[INFO] Geen actieve objecten gevonden.", 'log-data');
+                    else {
+                        activeProbeNodes.forEach(node => map.removeLayer(node));
+                        activeProbeNodes = []; logMsg("[SUCCES] Kaart gereinigd.", 'log-warn');
+                    }
+                } else if (command === 'clear' && !args[1]) {
+                    document.getElementById('terminalOutput').innerHTML = '';
+                } else { logMsg(`Specificeer wat u wilt wissen (bijv. 'clear nodes').`, 'log-warn'); }
+                break;
+
+            case 'import':
+                const type = args[1] ? args[1].toLowerCase() : '';
+                const url = args[2];
+                if (!url) { logMsg(`[FOUT] Syntaxis ontbreekt URL.`, 'log-warn'); return; }
+                if (type === 'xml') parseXMLFeed(url);
+                else logMsg(`[FOUT] Ongeldig parser type. Gebruik 'import xml [url]'.`, 'log-warn');
+                break;
+
+            default: logMsg(`[FOUT] Commando '${command}' niet herkend. Typ 'help'.`, 'log-error');
+        }
+    }
+
+    // --- 4. WebGL Stratigraphic Shader ---
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+    const vsSource = document.getElementById('vertexShader').textContent;
+    const fsSource = document.getElementById('fragmentShader').textContent;
+
+    function compileShader(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source); gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return null;
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    const vShader = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fShader = compileShader(gl.FRAGMENT_SHADER, fsSource);
+    
+    if(vShader && fShader) {
+        gl.attachShader(program, vShader); gl.attachShader(program, fShader);
+        gl.linkProgram(program); gl.useProgram(program);
+
+        const positionBuffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+        const posLoc = gl.getAttribLocation(program, "position");
+        gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+        const timeLoc = gl.getUniformLocation(program, "u_time");
+        const pingDepthLoc = gl.getUniformLocation(program, "u_pingDepth");
+
+        let startTime = Date.now(); let currentPingDepth = 0.0; let targetPingDepth = 0.0;
+
+        function renderGL() {
+            if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+                canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            }
+            gl.uniform1f(timeLoc, (Date.now() - startTime) / 1000.0);
+            currentPingDepth += (targetPingDepth - currentPingDepth) * 0.05;
+            gl.uniform1f(pingDepthLoc, currentPingDepth);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(renderGL);
+        }
+        renderGL();
+        
+        window.fireStratigraphicProbe = function() {
+            const depth_cm = parseFloat(document.getElementById('apiDepth').value);
+            const name = document.getElementById('apiName').value;
+            const coords = document.getElementById('apiCoords').value.split(',');
+
+            logMsg(`Initieer Z-As Puls [${document.getElementById('apiFreq').value}kHz] via ${name}.`, 'log-sys');
+            targetPingDepth = Math.min(depth_cm / 250.0, 1.0); currentPingDepth = 0.0; 
+
+            if(coords.length === 2) {
+                const newMarker = L.marker([parseFloat(coords[0]), parseFloat(coords[1])], {icon: customIcon}).addTo(map)
+                 .bindPopup(`<b>${name}</b><br>Diepte: -${depth_cm}cm`);
+                newMarker.openPopup(); activeProbeNodes.push(newMarker); 
+                map.flyTo([parseFloat(coords[0]), parseFloat(coords[1])], 14);
+            }
+        }
+    }
+
+    // --- 5. Institutional Gateways ---
+    const gateways = [
+        { id: 'gw-nasa', name: 'NASA Deep Space Net', type: 'ASTRO_TELEMETRY', status: 'OFFLINE' },
+        { id: 'gw-radar', name: 'Radar Coherence F_D', type: 'DOPPLER_MATH', status: 'OFFLINE' },
+        { id: 'gw-jazzband', name: 'Jazzband Codec', type: 'PYTHON_PARSER', status: 'OFFLINE' },
+        { id: 'gw-lnv', name: 'Ministerie LNV', type: 'SOIL_INTEGRITY', status: 'OFFLINE' }
+    ];
+
+    function renderGateways() {
+        document.getElementById('gateway-list').innerHTML = gateways.map(gw => `
+            <div class="gateway-item ${gw.status === 'CONNECTED' ? 'active' : ''}" id="${gw.id}">
+                <div class="gateway-info">
+                    <span class="gw-name">${gw.name}</span>
+                    <span class="gw-status">${gw.type} | ${gw.status}</span>
+                </div>
+                <button class="btn-connect" onclick="toggleGateway('${gw.id}')">${gw.status === 'CONNECTED' ? 'DISCONNECT' : 'UPLINK'}</button>
+            </div>
+        `).join('');
+    }
+
+    window.toggleGateway = function(id) {
+        const gw = gateways.find(g => g.id === id);
+        if(gw.status === 'OFFLINE') {
+            logMsg(`Initiërend handshake met ${gw.name}...`, 'log-sys');
+            setTimeout(() => { gw.status = 'CONNECTED'; logMsg(`[VERBONDEN] ${gw.name} actief.`, 'log-success'); renderGateways(); }, 800);
+        } else {
+            gw.status = 'OFFLINE'; logMsg(`Verbinding met ${gw.name} verbroken.`, 'log-sys'); renderGateways();
+        }
+    }
+    renderGateways();
+
+    setInterval(() => { logTelemetry(`[FRA1] SensorNet/Haptics OK. Accu: ${(11.0 + Math.random()).toFixed(2)}V`); }, 4000);
+
+</script>
+</body>
+</html>
