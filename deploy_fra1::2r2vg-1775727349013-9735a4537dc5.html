@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VORTEX OMNI-CORE v3.5 // SENSOR-FIX</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --fc-100-black: #050508; --laser-cyan: #00e5ff; --lithos-amber: #ffb000;                     
+            --matrix-green: #00ff41; --alert-red: #d92534; --sirius-blue: #0044ff;
+            --panel-bg: rgba(5, 10, 15, 0.95); --border-dim: #1a2a3a;
+        }
+        * { box-sizing: border-box; cursor: crosshair; }
+        body, html { background-color: var(--fc-100-black); color: #e0e0e0; font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        
+        /* Layout Grid */
+        header { flex: 0 0 50px; background: #000; border-bottom: 2px solid var(--laser-cyan); padding: 0 20px; display: flex; justify-content: space-between; align-items: center; z-index: 1000; box-shadow: 0 0 15px rgba(0, 229, 255, 0.2); }
+        .title { color: var(--laser-cyan); font-size: 1.2em; font-weight: bold; letter-spacing: 3px; }
+        
+        .main-grid { display: grid; grid-template-columns: 320px 1fr 320px; grid-template-rows: 1fr 220px; width: 100%; height: calc(100vh - 50px); }
+        
+        .panel { background: var(--panel-bg); border-right: 1px solid var(--border-dim); border-bottom: 1px solid var(--border-dim); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .panel-header { color: var(--lithos-amber); font-size: 0.85em; font-weight: bold; border-bottom: 1px solid var(--lithos-amber); padding-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* Map & WebGL & Camera */
+        .maps-container { display: flex; flex-direction: column; grid-column: 2 / 3; grid-row: 1 / 2; position: relative; }
+        #trackerMap { flex: 1.3; background: #020406; border-bottom: 1px solid var(--laser-cyan); position: relative; }
+        
+        #stratiMap { flex: 1; background: #000; position: relative; overflow: hidden; }
+        canvas { width: 100%; height: 100%; display: block; filter: contrast(1.2) brightness(1.1); position: absolute; top: 0; left: 0; }
+        
+        /* WebRTC Sensor Camera Styling - FIXED voor lay-out verschuivingen */
+        #sensorCam { 
+            display: none; 
+            position: absolute; /* Voorkomt dat de video het grid oprekt */
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            object-fit: cover; 
+            z-index: 10;
+            filter: grayscale(1) sepia(1) hue-rotate(130deg) contrast(1.5) brightness(0.8); 
+        }
+        .cam-scanlines { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06)); background-size: 100% 4px, 3px 100%; pointer-events: none; z-index: 450; display: none; }
+
+        .map-label { position: absolute; top: 10px; left: 10px; z-index: 400; background: rgba(0,0,0,0.8); padding: 4px 8px; border: 1px solid var(--laser-cyan); font-size: 0.65em; color: var(--laser-cyan); pointer-events: none; }
+
+        /* Overlays */
+        .sirius-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 500; mix-blend-mode: screen; opacity: 0.15; background: repeating-linear-gradient(0deg, var(--laser-cyan) 0px, transparent 1px, transparent 3px); }
+        .doppler-red { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:501; opacity:0; background: radial-gradient(circle at 30% 50%, var(--alert-red) 0%, transparent 60%); mix-blend-mode: screen; transition: 0.5s; }
+        .doppler-blue { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:501; opacity:0; background: radial-gradient(circle at 70% 50%, var(--sirius-blue) 0%, transparent 60%); mix-blend-mode: screen; transition: 0.5s; }
+
+        /* Terminal */
+        .terminal-container { grid-column: 1 / 4; grid-row: 2 / 3; background: #000; border-top: 2px solid var(--laser-cyan); display: flex; flex-direction: column; z-index: 100; }
+        .terminal-output { flex-grow: 1; padding: 12px; overflow-y: auto; font-size: 0.8em; line-height: 1.3; color: #8af; }
+        .terminal-input-wrapper { display: flex; padding: 8px 15px; background: #050508; border-top: 1px solid #1a2a3a; align-items: center; }
+        .cli-prompt { color: var(--laser-cyan); margin-right: 10px; font-weight: bold; }
+        #cliInput { flex-grow: 1; background: transparent; border: none; color: var(--matrix-green); font-family: inherit; font-size: 1em; outline: none; }
+
+        /* UI Elements */
+        .btn-action { background: #111; color: var(--laser-cyan); border: 1px solid var(--laser-cyan); padding: 8px; font-family: inherit; font-size: 0.7em; cursor: pointer; transition: 0.3s; width: 100%; font-weight: bold; }
+        .btn-action:hover { background: var(--laser-cyan); color: #000; box-shadow: 0 0 12px var(--laser-cyan); }
+        .btn-copy { background: #000; border: 1px solid var(--matrix-green); color: var(--matrix-green); padding: 4px; font-size: 0.6em; cursor: pointer; margin-top: 4px; }
+        .btn-copy:hover { background: var(--matrix-green); color: #000; }
+
+        .data-box { background: rgba(0, 255, 65, 0.05); border: 1px solid #1a2a3a; padding: 8px; font-size: 0.7em; display: flex; flex-direction: column; gap: 4px; }
+        .progress-container { height: 4px; background: #111; width: 100%; border-radius: 2px; overflow: hidden; margin-top: 4px; }
+        .progress-bar { height: 100%; width: 0%; background: var(--matrix-green); transition: width 0.4s; }
+        .stat-row { display: flex; justify-content: space-between; align-items: center; }
+
+        /* Blinking Beacons */
+        .beacon-marker { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--lithos-amber); background: rgba(255, 176, 0, 0.3); animation: ping 2s infinite; }
+        .beacon-ganuenta { border-color: var(--laser-cyan); background: rgba(0, 229, 255, 0.4); }
+        @keyframes ping { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+
+        @media screen and (max-width: 950px) {
+            body, html { overflow-y: auto; height: auto; }
+            header { flex-direction: column; height: auto; padding: 15px; gap: 10px; text-align: center; }
+            .main-grid { display: flex; flex-direction: column; height: auto; }
+            .maps-container { height: 65vh; min-height: 400px; order: -1; border-bottom: 2px solid var(--laser-cyan); }
+            .panel { border-right: none; max-height: 500px; }
+            .terminal-container { height: 35vh; min-height: 250px; border-top: 2px solid var(--laser-cyan); }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="title">VORTEX OMNI-CORE v3.5</div>
+    <div id="sysID" style="color:var(--matrix-green); font-size:0.7em; font-weight:bold;">RX-ID: SYNCING...</div>
+</header>
+
+<div class="main-grid">
+    <div class="panel">
+        <div class="panel-header">VERCEL DEPLOYMENT ENGINE</div>
+        <div class="data-box">
+            <div style="color:var(--laser-cyan); font-weight:bold; margin-bottom:5px;">TARGET: DEPLOY_FRA1</div>
+            <div class="stat-row" style="color:#888;">
+                <span>URL:</span>
+                <span style="font-size:0.8em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;" id="targetUrl">fra1-2r2vg...vercel.app</span>
+            </div>
+            <button class="btn-copy" onclick="copyUrl()">[ KOPIEER URL ]</button>
+            <div class="stat-row" style="margin-top:5px;"><span>STATUS:</span><span id="st-vercel" style="color:var(--lithos-amber);">STANDBY</span></div>
+            <div class="progress-container"><div id="pb-vercel" class="progress-bar"></div></div>
+            <button class="btn-action" style="margin-top:8px;" onclick="runDeploy()">PUSH TO VERCEL</button>
+            <button class="btn-action" style="margin-top:4px; border-color:var(--matrix-green); color:var(--matrix-green);" onclick="generateMobileQR()">MOBILE SYNC (QR)</button>
+            <div id="qrContainer" style="text-align:center; display:none; margin-top:10px;"><img id="qrImg" style="border: 2px solid var(--matrix-green); border-radius: 4px; padding: 4px; background: #000; max-width: 120px;"></div>
+        </div>
+
+        <div class="panel-header">WEBRTC DATACHANNELS</div>
+        <div class="data-box" id="p2pBox">
+            <div class="stat-row"><span>SIGNALING:</span><span style="color:#666;">OFFLINE</span></div>
+            <div class="stat-row"><span>UPLINK:</span><span style="color:#666;">DISCONNECTED</span></div>
+            <button class="btn-action" style="margin-top:8px; border-color:var(--lithos-amber); color:var(--lithos-amber);" onclick="processCommand('connect p2p')">INITIATE HANDSHAKE</button>
+        </div>
+    </div>
+
+    <div class="maps-container">
+        <div id="trackerMap">
+            <div class="map-label">XY-DOMAIN (ARCHAEO-NEXUS)</div>
+            <div class="sirius-overlay"></div>
+            <div class="doppler-red"></div>
+            <div class="doppler-blue"></div>
+        </div>
+        <div id="stratiMap">
+            <div class="map-label" style="border-color:var(--lithos-amber); color:var(--lithos-amber); z-index:400;"><span id="z-label">Z-DOMAIN: STRATIGRAFIE</span></div>
+            <canvas id="glCanvas"></canvas>
+            <video id="sensorCam" autoplay playsinline></video>
+            <div class="cam-scanlines" id="camScanlines"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">OMNI-SHADER CONTROLS (Z-AS)</div>
+        <button class="btn-action" onclick="processCommand('view lidar')">VIEW LIDAR POINTCLOUD</button>
+        <button class="btn-action" onclick="processCommand('view cyclone')" style="border-color:var(--sirius-blue); color:var(--sirius-blue);">VIEW 6 CYCLONE BEELDEN</button>
+        <button class="btn-action" onclick="processCommand('scan nebula')">VIEW SIRIUS NEBULA</button>
+        <button class="btn-action" onclick="processCommand('enable sensor')" style="background:var(--matrix-green); color:#000; margin-top:10px;">ACTIVATE SENSOR-CAM (WEBRTC)</button>
+
+        <div class="panel-header" style="margin-top:15px;">ARCHAEOLOGICAL DB (XY-AS)</div>
+        <button class="btn-action" onclick="processCommand('bodemkaart scan')" style="background:var(--laser-cyan); color:#000;">TOGGLE BODEMKAART</button>
+        <button class="btn-action" onclick="processCommand('locate all')">LOCATE ALL STRUCTURES</button>
+
+        <div class="panel-header" style="margin-top:15px;">DOPPLER ENGINE</div>
+        <div class="data-box">
+            <div class="stat-row" style="color:var(--alert-red);"><span>REDSHIFT:</span><span id="val-red">0%</span></div>
+            <div class="stat-row" style="color:var(--sirius-blue);"><span>BLUESHIFT:</span><span id="val-blue">0%</span></div>
+        </div>
+        <button class="btn-action" onclick="processCommand('shift doppler')" style="margin-top:8px;">TOGGLE DOPPLER PHASE</button>
+    </div>
+
+    <div class="terminal-container">
+        <div class="terminal-output" id="termOut"></div>
+        <div class="terminal-input-wrapper">
+            <span class="cli-prompt">vortex@omni:~#</span>
+            <input type="text" id="cliInput" autofocus autocomplete="off" spellcheck="false">
+        </div>
+    </div>
+</div>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+    attribute vec2 position; varying vec2 vUv;
+    void main() { vUv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }
+</script>
+<script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec2 vUv; uniform float u_time; uniform int u_mode; 
+    
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f*f*(3.0-2.0*f); return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x), mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y); }
+
+    void main() {
+        vec2 uv = vUv; vec3 color = vec3(0.02, 0.04, 0.08);
+        vec2 cuv = uv - 0.5; float dist = length(cuv); float angle = atan(cuv.y, cuv.x);
+
+        if(u_mode == 0) { // Stratigraphy
+            float layers = noise(uv * vec2(2.0, 15.0) + u_time * 0.05);
+            vec3 soil = mix(vec3(0.2, 0.1, 0.05), vec3(0.1, 0.15, 0.2), step(0.5, (1.0-uv.y) + layers * 0.1));
+            color = mix(color, soil, 0.7);
+        } else if(u_mode == 1) { // LiDAR Pointcloud
+            float pts = step(0.98, fract(uv.y * 60.0 + sin(uv.x * 20.0 + u_time*2.0)));
+            color += vec3(0.0, 1.0, 0.5) * pts * 0.6;
+            color += vec3(0.0, 0.3, 0.1) * smoothstep(0.05, 0.0, abs(uv.x - 0.5)) * sin(u_time*10.0);
+        } else if(u_mode == 2) { // Sirius Nebula
+            float spiral = sin(angle * 3.0 + dist * 12.0 - u_time * 3.0);
+            float intensity = smoothstep(0.5, 0.0, dist) * abs(spiral);
+            vec3 redP = vec3(1.0, 0.1, 0.1) * smoothstep(0.5, 0.0, length(cuv - vec2(-0.2, 0.0)));
+            vec3 blueP = vec3(0.0, 0.4, 1.0) * smoothstep(0.5, 0.0, length(cuv - vec2(0.2, 0.0)));
+            color += (redP + blueP) * intensity * 1.5;
+            color += vec3(0.0, 1.0, 0.8) * (0.01 / dist); // Ster
+        } else if(u_mode == 3) { // 6 Cyclone Beelden
+            vec3 cColor = vec3(0.0);
+            for(int i=0; i<6; i++) {
+                float theta = float(i) * (6.28318 / 6.0) + u_time * 0.5;
+                vec2 center = vec2(cos(theta), sin(theta)) * 0.25;
+                vec2 delta = cuv - center;
+                float dDist = length(delta);
+                float dAngle = atan(delta.y, delta.x);
+                float spiral = sin(dAngle * 4.0 + dDist * 20.0 - u_time * 5.0);
+                float intensity = smoothstep(0.15, 0.0, dDist) * abs(spiral);
+                cColor += vec3(0.1 + float(i)*0.1, 0.5, 1.0 - float(i)*0.1) * intensity;
+            }
+            color += cColor;
+            color += vec3(1.0, 1.0, 1.0) * (0.005 / dist);
+        }
+        
+        color -= vec3(0.1) * sin(uv.y * 200.0 - u_time * 10.0); // Scanline
+        gl_FragColor = vec4(color, 1.0);
+    }
+</script>
+
+<script>
+    // --- 1. SYSTEM INIT ---
+    const local_id = "VTX-" + Math.random().toString(36).substr(2, 5).toUpperCase();
+    document.getElementById('sysID').innerText = "SYS-ID: " + local_id;
+    
+    // UPDATED URL:
+    const targetUrl = "https://fra1-2r2vg-1775727349013-9735a4537d.vercel.app/deploy_fra1::2r2vg-1775727349013-9735a4537dc5.html";
+
+    const term = document.getElementById('termOut');
+    const log = (msg, type = 'sys') => {
+        const c = { sys: '#8af', ok: '#0f4', err: '#f44', cmd: '#0ff', data: '#ffb000' }[type] || '#fff';
+        term.innerHTML += `<div><span style="color:#555;">[${new Date().toLocaleTimeString()}]</span> <span style="color:${c}">${msg}</span></div>`;
+        term.scrollTop = term.scrollHeight;
+    };
+
+    // --- 2. MAP & DATA ---
+    const map = L.map('trackerMap', { zoomControl: false }).setView([52.25, 5.21], 11);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+    let activeNodes = [];
+    let ahnLayer = null;
+
+    const historicNodes = [{id: 6, l: "Hilversum, Wandelpad", x: 141.3, y: 470.4, z: 5.5}, {id: 10, l: "Laren, Hilversumseweg", x: 143.2, y: 473.9, z: 12.5}];
+    const grafheuvels = [{l: "Westerheide Tumulus 1", lat: 52.245, lon: 5.200}];
+    const kerken = [{l: "Sint-Vituskerk", lat: 52.224, lon: 5.175}];
+    const henges = [{l: "Henge Zevenbergen", lat: 51.745, lon: 5.560}];
+
+    function rdToWgs(x, y) { return [52.1 + (y - 470) * 0.009, 5.1 + (x - 140) * 0.015]; }
+
+    // --- 3. OMNI-SHADER (WebGL) ---
+    const glCanvas = document.getElementById('glCanvas');
+    const gl = glCanvas.getContext('webgl');
+    const compile = (t, s) => { let sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, document.getElementById('vertexShader').textContent));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, document.getElementById('fragmentShader').textContent));
+    gl.linkProgram(prog); gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+    const pLoc = gl.getAttribLocation(prog, "position"); gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, 0, 0, 0);
+    
+    let shaderMode = 0; 
+    const mLoc = gl.getUniformLocation(prog, "u_mode");
+    const tLoc = gl.getUniformLocation(prog, "u_time");
+    const zLabel = document.getElementById('z-label');
+
+    function renderGL() {
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.uniform1f(tLoc, performance.now() / 1000);
+        gl.uniform1i(mLoc, shaderMode);
+        gl.drawArrays(gl.TRIANGLES, 0, 6); requestAnimationFrame(renderGL);
+    }
+    renderGL();
+
+    function setShaderMode(mode, label) {
+        shaderMode = mode;
+        zLabel.innerText = `Z-DOMAIN: ${label}`;
+    }
+
+    // --- 4. WEBRTC SENSOR CAMERA ---
+    let streamActive = false;
+    async function toggleSensorCam() {
+        const vid = document.getElementById('sensorCam');
+        const lines = document.getElementById('camScanlines');
+        
+        if (!streamActive) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                vid.srcObject = stream;
+                vid.style.display = 'block';
+                lines.style.display = 'block';
+                glCanvas.style.opacity = '0'; // Hide WebGL behind camera
+                setShaderMode(4, "WEBRTC SENSOR FEED");
+                streamActive = true;
+                log("WebRTC Sensor-feed succesvol geactiveerd in Z-Domain.", "ok");
+            } catch (err) {
+                log(`WebRTC Fout: Kan camera niet benaderen. Check HTTPS of permissies.`, "err");
+            }
+        } else {
+            const tracks = vid.srcObject?.getTracks();
+            if (tracks) tracks.forEach(t => t.stop());
+            vid.style.display = 'none';
+            lines.style.display = 'none';
+            glCanvas.style.opacity = '1';
+            streamActive = false;
+            setShaderMode(0, "STRATIGRAFIE");
+            log("Sensor-feed gedeactiveerd.", "sys");
+        }
+    }
+
+    // --- 5. ENGINE FUNCTIONS ---
+    function copyUrl() {
+        navigator.clipboard.writeText(targetUrl).then(() => log("Vercel Deploy URL gekopieerd naar klembord.", "ok"))
+        .catch(err => log("Kopiëren mislukt.", "err"));
+    }
+
+    function runDeploy() {
+        log("Initiating Vercel Deployment Protocol...", "sys");
+        const bar = document.getElementById('pb-vercel');
+        const st = document.getElementById('st-vercel');
+        st.innerText = "BUILDING..."; st.style.color = "var(--lithos-amber)";
+        let p = 0;
+        const int = setInterval(() => {
+            p += Math.random() * 25;
+            if(p >= 100) { p = 100; clearInterval(int); st.innerText = "DEPLOYED"; st.style.color = "var(--matrix-green)"; log("Vercel Build Complete.", "ok"); }
+            bar.style.width = p + "%";
+        }, 500);
+    }
+
+    function generateMobileQR() {
+        const qrApi = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(targetUrl)}&color=00ff41&bgcolor=050508`;
+        document.getElementById('qrContainer').style.display = "block";
+        document.getElementById('qrImg').src = qrApi;
+        log("QR-Code Gegenereerd voor Mobile Sync.", "ok");
+    }
+
+    // --- 6. CLI PROCESSOR ---
+    function processCommand(input) {
+        const cmd = input.toLowerCase().trim();
+        log(`vortex@omni:~# ${cmd}`, 'cmd');
+
+        if(cmd === 'bodemkaart scan') {
+            if(ahnLayer) { map.removeLayer(ahnLayer); ahnLayer = null; log("Bodemkaart gedeactiveerd.", "sys"); }
+            else {
+                ahnLayer = L.tileLayer.wms("https://service.pdok.nl/bzk/bro-bodemkaart/wms/v1_0?", { layers: 'bro-bodemkaart', format: 'image/png', transparent: true, opacity: 0.5 }).addTo(map);
+                log("PDOK Bodemkaart WMS geactiveerd.", "data");
+            }
+        }
+        else if(cmd === 'view lidar') { setShaderMode(1, "LIDAR POINTCLOUD"); log("Z-Domain: LiDAR Actief", "ok"); }
+        else if(cmd === 'scan nebula') { setShaderMode(2, "SIRIUS NEBULA"); log("Z-Domain: Nebula Actief", "ok"); }
+        else if(cmd === 'view cyclone') { setShaderMode(3, "6 CYCLONE BEELDEN"); log("Z-Domain: 6 Cyclones geactiveerd.", "ok"); }
+        else if(cmd === 'enable sensor' || cmd === 'sensor cam') { toggleSensorCam(); }
+        else if(cmd === 'shift doppler') {
+            const rv = Math.random();
+            document.querySelector('.doppler-red').style.opacity = rv; document.querySelector('.doppler-blue').style.opacity = 1 - rv;
+            document.getElementById('val-red').innerText = Math.round(rv*100) + "%"; document.getElementById('val-blue').innerText = Math.round((1-rv)*100) + "%";
+            log("Doppler frequentie-verschuiving toegepast.", "sys");
+        }
+        else if(cmd === 'locate all') { log("Macro-Scan Voltooid.", "sys"); }
+        else if(cmd === 'connect p2p') {
+            document.getElementById('p2pBox').innerHTML = `<div class="stat-row"><span>SIGNALING:</span><span style="color:var(--matrix-green);">CONNECTED</span></div><div class="stat-row"><span>UPLINK:</span><span style="color:var(--laser-cyan);">ACTIVE</span></div>`;
+            log("DataChannel established. Peer synced.", "ok");
+        }
+        else if(cmd === 'clear') {
+            document.getElementById('termOut').innerHTML = ''; 
+            if(streamActive) toggleSensorCam(); 
+            else setShaderMode(0, "STRATIGRAFIE");
+        }
+        else log(`Commando '${cmd}' niet herkend. Typ 'help'.`, 'err');
+    }
+
+    document.getElementById('cliInput').addEventListener('keydown', (e) => {
+        if(e.key === 'Enter') { processCommand(e.target.value); e.target.value = ''; }
+    });
+
+    log(`VORTEX Omni-Core v3.5 (Sensor-Fix Edition) Opgestart.`, 'ok');
+</script>
+</body>
+</html>
